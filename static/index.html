@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 小说生成器</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0f1117;--bg2:#1a1d27;--bg3:#242836;--border:#2e3348;--text:#e0e0e0;--text2:#8b8fa3;--accent:#5b8af5;--accent2:#4a76e0;--green:#4caf50;--red:#ef5350;--orange:#ff9800;--purple:#ab47bc}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden}
+a{color:var(--accent);text-decoration:none}
+header{background:var(--bg2);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;gap:16px;flex-shrink:0}
+header h1{font-size:18px;font-weight:600}
+header .status-badge{font-size:12px;padding:3px 10px;border-radius:12px;background:var(--bg3);color:var(--text2)}
+header .status-badge.active{background:var(--accent);color:#fff}
+.container{display:flex;flex:1;overflow:hidden}
+nav{width:180px;background:var(--bg2);border-right:1px solid var(--border);padding:16px 0;flex-shrink:0;display:flex;flex-direction:column}
+nav a{display:block;padding:10px 20px;color:var(--text2);font-size:14px;transition:all .15s;cursor:pointer}
+nav a:hover{background:var(--bg3);color:var(--text)}
+nav a.active{background:var(--accent);color:#fff;border-right:3px solid var(--accent)}
+nav .spacer{flex:1}
+nav .task-indicator{padding:10px 20px;font-size:12px;color:var(--orange);display:none}
+nav .task-indicator.show{display:block}
+main{flex:1;overflow-y:auto;padding:24px;display:none}
+main.active{display:block}
+.panel{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:20px;margin-bottom:16px}
+.panel h2{font-size:16px;margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+.panel h3{font-size:14px;margin:12px 0 8px;color:var(--text2)}
+.form-group{margin-bottom:14px}
+.form-group label{display:block;font-size:13px;color:var(--text2);margin-bottom:4px}
+.form-group input,.form-group textarea,.form-group select{width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:8px 10px;color:var(--text);font-size:13px;font-family:inherit}
+.form-group textarea{min-height:80px;resize:vertical}
+.form-group input:focus,.form-group textarea:focus{outline:none;border-color:var(--accent)}
+.form-group input[readonly],.form-group textarea[readonly]{opacity:.6;cursor:not-allowed;background:var(--bg)}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border:none;border-radius:4px;font-size:13px;font-family:inherit;cursor:pointer;transition:all .15s}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover:not(:disabled){background:var(--accent2)}
+.btn-success{background:var(--green);color:#fff}
+.btn-success:hover:not(:disabled){background:#43a047}
+.btn-danger{background:var(--red);color:#fff}
+.btn-danger:hover:not(:disabled){background:#e53935}
+.btn-outline{background:transparent;border:1px solid var(--border);color:var(--text)}
+.btn-outline:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+.btn-group{display:flex;gap:8px;margin-top:12px}
+.outline-table{width:100%;border-collapse:collapse;font-size:13px}
+.outline-table th{text-align:left;padding:8px;color:var(--text2);border-bottom:1px solid var(--border);font-weight:500}
+.outline-table td{padding:8px;border-bottom:1px solid var(--border);vertical-align:top}
+.outline-table tr:hover{background:var(--bg3)}
+.chapter-list{list-style:none}
+.chapter-list li{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s;font-size:13px}
+.chapter-list li:hover{background:var(--bg3)}
+.chapter-list li.active{background:var(--bg3);border-left:3px solid var(--accent)}
+.chapter-list li .status{font-size:16px;width:24px;text-align:center}
+.chapter-list li .num{color:var(--text2);width:30px}
+.chapter-list li .title{flex:1}
+.chapter-viewer{display:grid;grid-template-columns:280px 1fr;gap:16px;min-height:500px}
+.chapter-content{background:var(--bg3);border-radius:6px;padding:16px;font-size:14px;line-height:1.8;white-space:pre-wrap;max-height:600px;overflow-y:auto}
+.chapter-summary{background:var(--bg3);border-radius:6px;padding:12px;font-size:13px;color:var(--text2);margin-bottom:12px;line-height:1.6}
+.progress-bar{width:100%;height:6px;background:var(--bg3);border-radius:3px;overflow:hidden;margin:8px 0}
+.progress-bar .fill{height:100%;background:var(--accent);border-radius:3px;transition:width .3s}
+.log-panel{background:var(--bg2);border-top:1px solid var(--border);flex-shrink:0;max-height:250px;display:flex;flex-direction:column}
+.log-panel .log-header{padding:8px 16px;font-size:13px;font-weight:600;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;cursor:pointer}
+.log-panel .log-header .toggle{font-size:11px;color:var(--text2)}
+.log-panel .log-body{flex:1;overflow-y:auto;padding:8px 16px;font-family:"Cascadia Code","Fira Code",monospace;font-size:12px;line-height:1.7}
+.log-panel .log-body .entry{display:flex;gap:8px}
+.log-panel .log-body .entry .time{color:var(--text2);flex-shrink:0}
+.log-panel .log-body .entry.info .msg{color:var(--text)}
+.log-panel .log-body .entry.error .msg{color:var(--red)}
+.log-panel .log-body .entry.warn .msg{color:var(--orange)}
+.log-panel .log-body .entry.success .msg{color:var(--green)}
+.log-panel.collapsed .log-body{display:none}
+.empty-state{text-align:center;padding:40px;color:var(--text2)}
+.empty-state .icon{font-size:48px;margin-bottom:12px}
+.feedback-row{display:flex;gap:8px;margin-top:12px}
+.feedback-row input{flex:1}
+.toast{position:fixed;top:20px;right:20px;padding:12px 20px;border-radius:6px;font-size:13px;color:#fff;z-index:1000;animation:slideIn .3s;max-width:400px}
+.toast.success{background:var(--green)}
+.toast.error{background:var(--red)}
+.toast.info{background:var(--accent)}
+@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+.spinning{animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<header>
+<h1>AI 小说生成器</h1>
+<span id="phaseBadge" class="status-badge">未开始</span>
+<span id="taskBadge" class="status-badge" style="display:none;background:var(--orange)">任务运行中...</span>
+</header>
+<div class="container">
+<nav>
+<a data-page="config" class="active">配置</a>
+<a data-page="outline">大纲</a>
+<a data-page="writing">写作</a>
+<div class="spacer"></div>
+<div id="taskIndicator" class="task-indicator">⏳ AI 思考中...</div>
+</nav>
+
+<main id="page-config" class="active">
+<div class="panel">
+<h2>API 配置</h2>
+<div class="form-row">
+<div class="form-group">
+<label>API Base URL</label>
+<input id="cfgBaseURL" type="text" placeholder="https://api.example.com/v1/">
+</div>
+<div class="form-group">
+<label>Model</label>
+<input id="cfgModel" type="text" placeholder="gpt-4">
+</div>
+</div>
+<div class="form-row">
+<div class="form-group">
+<label>API Key</label>
+<input id="cfgAPIKey" type="password" placeholder="sk-...">
+</div>
+<div class="form-group">
+<label>HTTP 超时（秒）</label>
+<input id="cfgTimeout" type="number" value="300">
+</div>
+</div>
+</div>
+<div class="panel">
+<h2>故事配置</h2>
+<div id="configReadonlyNotice" style="display:none;padding:8px 12px;margin-bottom:12px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;font-size:12px;color:var(--orange)">已有大纲，故事配置不可修改。如需修改，请先删除大纲。</div>
+<div class="form-row">
+<div class="form-group">
+<label>故事类型</label>
+<input id="cfgStoryType" type="text" placeholder="奇幻/都市/科幻...">
+</div>
+<div class="form-group">
+<label>小说标题（留空由 AI 生成）</label>
+<input id="cfgStoryTitle" type="text" placeholder="留空则 AI 自动生成">
+</div>
+</div>
+<div class="form-row">
+<div class="form-group">
+<label>章节数量</label>
+<input id="cfgChapterCount" type="number" value="30">
+</div>
+<div class="form-group">
+<label>每章目标字数</label>
+<input id="cfgTargetWords" type="number" value="2500">
+</div>
+</div>
+<div class="form-group">
+<label>写作风格</label>
+<textarea id="cfgWritingStyle" placeholder="描述你期望的写作风格..."></textarea>
+</div>
+<div class="form-group">
+<label>角色设定</label>
+<textarea id="cfgCharacterSetting" placeholder="主要角色设定..."></textarea>
+</div>
+<div class="form-group">
+<label>世界观设定</label>
+<textarea id="cfgWorldSetting" placeholder="世界观设定..."></textarea>
+</div>
+<div class="form-group">
+<label>核心写作要求</label>
+<textarea id="cfgCoreRequirements" placeholder="其他核心写作要求..."></textarea>
+</div>
+<div class="btn-group">
+<button class="btn btn-primary" onclick="saveConfig()">保存配置</button>
+</div>
+</div>
+</main>
+
+<main id="page-outline">
+<div class="panel">
+<h2>大纲生成</h2>
+<div id="outlineEmpty" class="empty-state">
+<div class="icon">📝</div>
+<p>尚未生成大纲。点击下方按钮开始生成。</p>
+<div class="btn-group" style="justify-content:center;margin-top:16px">
+<button class="btn btn-primary" id="btnGenOutline" onclick="generateOutline()">生成大纲</button>
+</div>
+</div>
+<div id="outlineContent" style="display:none">
+<h3>📖 <span id="outlineTitle"></span></h3>
+<div class="form-group">
+<label>核心写作提示词</label>
+<div id="outlineCorePrompt" class="chapter-summary"></div>
+</div>
+<div class="form-group">
+<label>核心写作要求</label>
+<div id="outlineCoreReqs" class="chapter-summary"></div>
+</div>
+<h3>章节大纲</h3>
+<table class="outline-table">
+<thead><tr><th>#</th><th>标题</th><th>大纲</th><th>状态</th></tr></thead>
+<tbody id="outlineTableBody"></tbody>
+</table>
+<div class="btn-group">
+<button class="btn btn-success" id="btnConfirmOutline" onclick="confirmOutline()">确认大纲</button>
+<button class="btn btn-outline" id="btnReviseOutline" onclick="reviseOutline()">修订大纲</button>
+<button class="btn btn-danger" id="btnDeleteOutline" onclick="deleteOutline()">删除大纲</button>
+</div>
+<div id="outlineFeedbackRow" class="feedback-row" style="display:none">
+<input id="outlineFeedback" type="text" placeholder="输入修改意见..." onkeydown="if(event.key==='Enter')submitOutlineRevise()">
+<button class="btn btn-primary" onclick="submitOutlineRevise()">提交修订</button>
+</div>
+</div>
+</div>
+</main>
+
+<main id="page-writing">
+<div id="writingEmpty" class="empty-state">
+<div class="icon">✍️</div>
+<p>请先完成大纲确认，再进入写作阶段。</p>
+</div>
+<div id="writingContent" style="display:none">
+<div class="panel">
+<h2>写作进度</h2>
+<div class="progress-bar"><div id="writeProgress" class="fill" style="width:0%"></div></div>
+<div style="font-size:13px;color:var(--text2)" id="writeProgressText">0%</div>
+</div>
+<div class="chapter-viewer">
+<div class="panel" style="padding:0;overflow-y:auto;max-height:600px">
+<div style="padding:12px 16px;font-size:14px;font-weight:600;border-bottom:1px solid var(--border)">章节列表</div>
+<ul id="chapterList" class="chapter-list"></ul>
+</div>
+<div>
+<div class="panel">
+<h2 id="chapterViewerTitle">选择一个章节查看</h2>
+<div id="chapterViewerSummary" class="chapter-summary" style="display:none"></div>
+<div id="chapterViewerContent" class="chapter-content" style="display:none"></div>
+<div id="chapterViewerActions" style="display:none">
+<div class="btn-group">
+<button class="btn btn-primary" id="btnGenChapter" onclick="generateChapter()">生成本章</button>
+<button class="btn btn-success" id="btnConfirmChapter" onclick="confirmChapter()">确认本章</button>
+<button class="btn btn-outline" id="btnReviseChapter" onclick="showChapterFeedback()">修改本章</button>
+<button class="btn btn-danger" id="btnDeleteChapter" onclick="deleteChapter()">删除本章</button>
+</div>
+<div id="chapterFeedbackRow" class="feedback-row" style="display:none">
+<input id="chapterFeedback" type="text" placeholder="输入修改意见..." onkeydown="if(event.key==='Enter')submitChapterRevise()">
+<button class="btn btn-primary" onclick="submitChapterRevise()">提交修改</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+</div>
+
+<div id="logPanel" class="log-panel">
+<div class="log-header" onclick="toggleLog()">
+<span>实时日志</span>
+<span class="toggle" id="logToggle">收起</span>
+</div>
+<div class="log-body" id="logBody"></div>
+</div>
+
+<script>
+const App={
+  progress:null,
+  config:null,
+  taskRunning:false,
+  currentPage:'config',
+  selectedChapter:-1,
+  eventSource:null,
+  streamingContent:'',
+  streamingChapterIdx:-1,
+  init(){
+    this.connectSSE();
+    this.loadConfig();
+    this.loadProgress();
+    this.setupNav();
+    window.addEventListener('hashchange',()=>this.route());
+    this.route();
+  },
+  connectSSE(){
+    if(this.eventSource)this.eventSource.close();
+    this.eventSource=new EventSource('/api/events');
+    this.eventSource.addEventListener('log',e=>{
+      const d=JSON.parse(e.data);
+      this.appendLog(d);
+    });
+    this.eventSource.addEventListener('progress_update',e=>{
+      const d=JSON.parse(e.data);
+      this.loadProgress();
+    });
+    this.eventSource.addEventListener('task_start',e=>{
+      this.taskRunning=true;
+      this.streamingContent='';
+      this.streamingChapterIdx=-1;
+      this.updateTaskUI();
+      this.renderProgress();
+    });
+    this.eventSource.addEventListener('task_end',e=>{
+      this.taskRunning=false;
+      this.streamingContent='';
+      this.streamingChapterIdx=-1;
+      this.updateTaskUI();
+      this.renderProgress();
+      this.loadProgress();
+    });
+    this.eventSource.addEventListener('content_chunk',e=>{
+      const d=JSON.parse(e.data);
+      this.appendContentChunk(d.chapter_idx,d.text);
+    });
+    this.eventSource.onerror=()=>{
+      setTimeout(()=>this.connectSSE(),3000);
+    };
+  },
+  setupNav(){
+    document.querySelectorAll('nav a[data-page]').forEach(a=>{
+      a.addEventListener('click',e=>{
+        e.preventDefault();
+        location.hash='#'+a.dataset.page;
+      });
+    });
+  },
+  route(){
+    const hash=(location.hash||'#config').slice(1);
+    document.querySelectorAll('nav a').forEach(a=>a.classList.remove('active'));
+    document.querySelectorAll('main').forEach(m=>m.classList.remove('active'));
+    const navEl=document.querySelector(`nav a[data-page="${hash}"]`);
+    const pageEl=document.getElementById('page-'+hash);
+    if(navEl)navEl.classList.add('active');
+    if(pageEl)pageEl.classList.add('active');
+    this.currentPage=hash;
+  },
+  updateTaskUI(){
+    const badge=document.getElementById('taskBadge');
+    const indicator=document.getElementById('taskIndicator');
+    badge.style.display=this.taskRunning?'inline':'none';
+    indicator.classList.toggle('show',this.taskRunning);
+  },
+  appendLog(entry){
+    const body=document.getElementById('logBody');
+    const div=document.createElement('div');
+    div.className='entry '+entry.level;
+    div.innerHTML=`<span class="time">${entry.time}</span><span class="msg">${this.escHtml(entry.msg)}</span>`;
+    body.appendChild(div);
+    body.scrollTop=body.scrollHeight;
+  },
+  escHtml(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML},
+  appendContentChunk(chapterIdx,text){
+    this.streamingChapterIdx=chapterIdx;
+    this.streamingContent+=text;
+    if(this.selectedChapter===chapterIdx){
+      const contentEl=document.getElementById('chapterViewerContent');
+      contentEl.style.display='block';
+      contentEl.textContent=this.streamingContent;
+    }
+  },
+  toast(msg,type='info'){
+    const t=document.createElement('div');
+    t.className='toast '+type;
+    t.textContent=msg;
+    document.body.appendChild(t);
+    setTimeout(()=>t.remove(),3000);
+  },
+  async api(method,url,body){
+    const opts={method,headers:{'Content-Type':'application/json'}};
+    if(body)opts.body=JSON.stringify(body);
+    const r=await fetch(url,opts);
+    const data=await r.json();
+    if(!r.ok)throw new Error(data.error||'请求失败');
+    return data;
+  },
+  async loadConfig(){
+    try{
+      this.config=await this.api('GET','/api/config');
+      document.getElementById('cfgBaseURL').value=this.config.base_url||'';
+      document.getElementById('cfgModel').value=this.config.model||'';
+      document.getElementById('cfgAPIKey').value=this.config.api_key||'';
+      document.getElementById('cfgTimeout').value=this.config.http_timeout_seconds||300;
+      const s=this.config.story||{};
+      document.getElementById('cfgStoryType').value=s.type||'';
+      document.getElementById('cfgStoryTitle').value=s.title||'';
+      document.getElementById('cfgChapterCount').value=s.chapter_count||30;
+      document.getElementById('cfgTargetWords').value=s.target_words_per_chapter||2500;
+      document.getElementById('cfgWritingStyle').value=s.writing_style||'';
+      document.getElementById('cfgCharacterSetting').value=s.character_setting||'';
+      document.getElementById('cfgWorldSetting').value=s.world_setting||'';
+      document.getElementById('cfgCoreRequirements').value=s.core_requirements||'';
+    }catch(e){console.error('loadConfig:',e)}
+  },
+  async saveConfig(){
+    const cfg={
+      api_key:document.getElementById('cfgAPIKey').value,
+      base_url:document.getElementById('cfgBaseURL').value,
+      model:document.getElementById('cfgModel').value,
+      http_timeout_seconds:parseInt(document.getElementById('cfgTimeout').value)||300,
+      story:{
+        type:document.getElementById('cfgStoryType').value,
+        title:document.getElementById('cfgStoryTitle').value,
+        chapter_count:parseInt(document.getElementById('cfgChapterCount').value)||30,
+        target_words_per_chapter:parseInt(document.getElementById('cfgTargetWords').value)||2500,
+        writing_style:document.getElementById('cfgWritingStyle').value,
+        character_setting:document.getElementById('cfgCharacterSetting').value,
+        world_setting:document.getElementById('cfgWorldSetting').value,
+        core_requirements:document.getElementById('cfgCoreRequirements').value
+      },
+      prompts:{}
+    };
+    try{
+      await this.api('PUT','/api/config',cfg);
+      this.toast('配置已保存','success');
+      this.config=cfg;
+    }catch(e){this.toast(e.message,'error')}
+  },
+  async loadProgress(){
+    try{
+      this.progress=await this.api('GET','/api/progress');
+      this.renderProgress();
+    }catch(e){console.error('loadProgress:',e)}
+  },
+  renderProgress(){
+    const p=this.progress;
+    if(!p)return;
+    const badge=document.getElementById('phaseBadge');
+    const phaseNames={outline:'大纲阶段',writing:'写作阶段'};
+    badge.textContent=phaseNames[p.phase]||p.phase;
+    badge.classList.add('active');
+    this.updateConfigReadonly(p);
+    this.renderOutline(p);
+    this.renderWriting(p);
+  },
+  updateConfigReadonly(p){
+    const hasOutline=p.chapters&&p.chapters.length>0;
+    const notice=document.getElementById('configReadonlyNotice');
+    notice.style.display=hasOutline?'block':'none';
+    const fields=['cfgStoryType','cfgStoryTitle','cfgChapterCount','cfgTargetWords','cfgWritingStyle','cfgCharacterSetting','cfgWorldSetting','cfgCoreRequirements'];
+    fields.forEach(id=>{
+      const el=document.getElementById(id);
+      if(el)el.readOnly=hasOutline;
+    });
+  },
+  renderOutline(p){
+    const hasOutline=p.chapters&&p.chapters.length>0;
+    document.getElementById('outlineEmpty').style.display=hasOutline?'none':'block';
+    document.getElementById('outlineContent').style.display=hasOutline?'block':'none';
+    document.getElementById('btnGenOutline').disabled=hasOutline||this.taskRunning;
+    if(!hasOutline)return;
+    document.getElementById('outlineTitle').textContent=p.title||'';
+    document.getElementById('outlineCorePrompt').textContent=p.core_prompt||'';
+    document.getElementById('outlineCoreReqs').textContent=p.core_requirements||'';
+    const tbody=document.getElementById('outlineTableBody');
+    tbody.innerHTML='';
+    const statusIcons={pending:'',writing:'⏳',review:'👀',accepted:'✅'};
+    p.chapters.forEach(ch=>{
+      const tr=document.createElement('tr');
+      tr.innerHTML=`<td>${ch.num}</td><td>${this.escHtml(ch.title)}</td><td>${this.escHtml(ch.outline)}</td><td>${statusIcons[ch.status]||''}</td>`;
+      tbody.appendChild(tr);
+    });
+    const inOutline=p.phase==='outline';
+    const hasContent=p.chapters.some(c=>c.content);
+    document.getElementById('btnConfirmOutline').disabled=!inOutline||this.taskRunning;
+    document.getElementById('btnReviseOutline').disabled=!inOutline||this.taskRunning;
+    document.getElementById('btnDeleteOutline').disabled=hasContent||this.taskRunning;
+  },
+  renderWriting(p){
+    const inWriting=p.phase==='writing';
+    document.getElementById('writingEmpty').style.display=inWriting?'none':'block';
+    document.getElementById('writingContent').style.display=inWriting?'block':'none';
+    if(!inWriting||!p.chapters)return;
+    const total=p.chapters.length;
+    const accepted=p.chapters.filter(c=>c.status==='accepted').length;
+    const pct=total>0?Math.round(accepted/total*100):0;
+    document.getElementById('writeProgress').style.width=pct+'%';
+    document.getElementById('writeProgressText').textContent=`${pct}% (${accepted}/${total})`;
+    const list=document.getElementById('chapterList');
+    list.innerHTML='';
+    const statusIcons={pending:'',writing:'⏳',review:'👀',accepted:'✅'};
+    p.chapters.forEach((ch,i)=>{
+      const li=document.createElement('li');
+      li.innerHTML=`<span class="status">${statusIcons[ch.status]||''}</span><span class="num">${ch.num}</span><span class="title">${this.escHtml(ch.title)}</span>`;
+      li.addEventListener('click',()=>this.selectChapter(i));
+      if(i===this.selectedChapter)li.classList.add('active');
+      list.appendChild(li);
+    });
+    if(this.selectedChapter>=0)this.renderChapterViewer(p.chapters[this.selectedChapter]);
+  },
+  selectChapter(i){
+    this.selectedChapter=i;
+    this.renderProgress();
+  },
+  renderChapterViewer(ch){
+    document.getElementById('chapterViewerTitle').textContent=`第 ${ch.num} 章: ${ch.title}`;
+    const summaryEl=document.getElementById('chapterViewerSummary');
+    const contentEl=document.getElementById('chapterViewerContent');
+    const actionsEl=document.getElementById('chapterViewerActions');
+    const feedbackRow=document.getElementById('chapterFeedbackRow');
+    actionsEl.style.display='block';
+    feedbackRow.style.display='none';
+    if(ch.summary){summaryEl.style.display='block';summaryEl.textContent=ch.summary}else{summaryEl.style.display='none'}
+    if(ch.content){contentEl.style.display='block';contentEl.textContent=ch.content}else{contentEl.style.display='none';contentEl.innerHTML=''}
+    const p=this.progress;
+    const isCurrent=p.current_chapter_index===this.selectedChapter;
+    const genBtn=document.getElementById('btnGenChapter');
+    const confBtn=document.getElementById('btnConfirmChapter');
+    const revBtn=document.getElementById('btnReviseChapter');
+    genBtn.style.display=(ch.status==='pending'&&isCurrent)?'inline-flex':'none';
+    confBtn.style.display=ch.status==='review'?'inline-flex':'none';
+    revBtn.style.display=(ch.status==='review'||ch.status==='writing')?'inline-flex':'none';
+    const isLast=this.selectedChapter===p.chapters.length-1;
+    const delBtn=document.getElementById('btnDeleteChapter');
+    delBtn.style.display=(isLast&&ch.status!=='writing'&&ch.status!=='pending')?'inline-flex':'none';
+    genBtn.disabled=this.taskRunning;
+    confBtn.disabled=this.taskRunning;
+    revBtn.disabled=this.taskRunning;
+    delBtn.disabled=this.taskRunning;
+  },
+  async generateOutline(){
+    try{
+      await this.api('POST','/api/outline/generate');
+      this.toast('大纲生成中...','info');
+    }catch(e){this.toast(e.message,'error')}
+  },
+  async confirmOutline(){
+    try{
+      await this.api('POST','/api/outline/confirm');
+      this.toast('大纲已确认','success');
+      await this.loadProgress();
+    }catch(e){this.toast(e.message,'error')}
+  },
+  reviseOutline(){
+    const row=document.getElementById('outlineFeedbackRow');
+    row.style.display=row.style.display==='none'?'flex':'none';
+  },
+  async submitOutlineRevise(){
+    const fb=document.getElementById('outlineFeedback').value.trim();
+    if(!fb)return;
+    try{
+      await this.api('POST','/api/outline/revise',{feedback:fb});
+      document.getElementById('outlineFeedback').value='';
+      document.getElementById('outlineFeedbackRow').style.display='none';
+      this.toast('大纲修订中...','info');
+    }catch(e){this.toast(e.message,'error')}
+  },
+  async generateChapter(){
+    try{
+      await this.api('POST','/api/chapter/generate');
+      this.toast('章节生成中...','info');
+    }catch(e){this.toast(e.message,'error')}
+  },
+  async confirmChapter(){
+    try{
+      await this.api('POST','/api/chapter/confirm');
+      this.toast('章节已确认','success');
+      await this.loadProgress();
+    }catch(e){this.toast(e.message,'error')}
+  },
+  showChapterFeedback(){
+    const row=document.getElementById('chapterFeedbackRow');
+    row.style.display=row.style.display==='none'?'flex':'none';
+  },
+  async submitChapterRevise(){
+    const fb=document.getElementById('chapterFeedback').value.trim();
+    if(!fb)return;
+    try{
+      await this.api('POST','/api/chapter/revise',{feedback:fb});
+      document.getElementById('chapterFeedback').value='';
+      document.getElementById('chapterFeedbackRow').style.display='none';
+      this.toast('章节修订中...','info');
+    }catch(e){this.toast(e.message,'error')}
+  },
+  async deleteChapter(){
+    try{
+      await this.api('DELETE','/api/chapter');
+      this.toast('章节已删除','success');
+      await this.loadProgress();
+      if(!this.progress.chapters||this.progress.chapters.length===0){
+        this.selectedChapter=-1;
+      } else if(this.selectedChapter>=this.progress.chapters.length){
+        this.selectedChapter=this.progress.chapters.length-1;
+      }
+      this.renderProgress();
+    }catch(e){this.toast(e.message,'error')}
+  },
+  async deleteOutline(){
+    try{
+      await this.api('DELETE','/api/outline');
+      this.toast('大纲已删除','success');
+      this.selectedChapter=-1;
+      await this.loadProgress();
+    }catch(e){this.toast(e.message,'error')}
+  }
+};
+
+function saveConfig(){App.saveConfig()}
+function generateOutline(){App.generateOutline()}
+function confirmOutline(){App.confirmOutline()}
+function reviseOutline(){App.reviseOutline()}
+function submitOutlineRevise(){App.submitOutlineRevise()}
+function generateChapter(){App.generateChapter()}
+function confirmChapter(){App.confirmChapter()}
+function showChapterFeedback(){App.showChapterFeedback()}
+function submitChapterRevise(){App.submitChapterRevise()}
+function deleteChapter(){App.deleteChapter()}
+function deleteOutline(){App.deleteOutline()}
+
+function toggleLog(){
+  document.getElementById('logPanel').classList.toggle('collapsed');
+  const t=document.getElementById('logToggle');
+  t.textContent=t.textContent==='收起'?'展开':'收起';
+}
+
+App.init();
+</script>
+</body>
+</html>

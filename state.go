@@ -1,0 +1,93 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+)
+
+type ChapterState struct {
+	Num     int    `json:"num"`
+	Title   string `json:"title"`
+	Outline string `json:"outline"`
+	Content string `json:"content"`
+	Summary string `json:"summary"`
+	Status  string `json:"status"` // pending | writing | review | accepted
+}
+
+type ForeshadowStatus string
+
+const (
+	ForeshadowPlanted     ForeshadowStatus = "planted"
+	ForeshadowProgressing ForeshadowStatus = "progressing"
+	ForeshadowResolved    ForeshadowStatus = "resolved"
+	ForeshadowAbandoned   ForeshadowStatus = "abandoned"
+)
+
+type ForeshadowEvent struct {
+	Chapter int    `json:"chapter"`
+	Note    string `json:"note"`
+}
+
+type Foreshadow struct {
+	ID            int               `json:"id"`
+	Name          string            `json:"name"`
+	Description   string            `json:"description"`
+	PlantChapter  int               `json:"plant_chapter"`
+	TargetChapter int               `json:"target_chapter"`
+	Status        ForeshadowStatus  `json:"status"`
+	Events        []ForeshadowEvent `json:"events"`
+	Resolution    string            `json:"resolution"`
+}
+
+type Progress struct {
+	Phase               string            `json:"phase"` // outline | writing
+	Title               string            `json:"title"`
+	CorePrompt          string            `json:"core_prompt"`
+	CoreRequirements    string            `json:"core_requirements"`
+	Chapters            []ChapterState    `json:"chapters"`
+	CurrentChapterIndex int               `json:"current_chapter_index"`
+	StoryConfigSnapshot *StoryConfig      `json:"story_config_snapshot,omitempty"`
+	Foreshadows         []Foreshadow      `json:"foreshadows,omitempty"`
+}
+
+const (
+	StatusPending  = "pending"
+	StatusWriting  = "writing"
+	StatusReview   = "review"
+	StatusAccepted = "accepted"
+)
+
+func LoadProgress(path string) (*Progress, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("读取进度文件失败: %w", err)
+	}
+
+	var p Progress
+	if err := json.Unmarshal(data, &p); err != nil {
+		return nil, fmt.Errorf("解析进度文件失败: %w", err)
+	}
+
+	return &p, nil
+}
+
+func SaveProgress(path string, p *Progress) error {
+	data, err := json.MarshalIndent(p, "", "  ")
+	if err != nil {
+		return fmt.Errorf("序列化进度失败: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("保存进度文件失败: %w", err)
+	}
+	return nil
+}
+
+func SaveChapterMarkdown(ch ChapterState, title string) {
+	filename := fmt.Sprintf("Chapter_%02d.md", ch.Num)
+	content := fmt.Sprintf("# 第 %d 章: %s\n\n> **本章摘要**：%s\n\n---\n\n%s", ch.Num, ch.Title, ch.Summary, ch.Content)
+	_ = os.WriteFile(filename, []byte(content), 0644)
+}
