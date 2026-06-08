@@ -1,18 +1,25 @@
 version: "3"
 
+vars:
+  BINARY:
+    sh: echo show-me-the-story$(go env GOEXE)
+
 tasks:
   build:
     desc: 编译项目
     cmds:
-      - go build -o show-me-the-story.exe .
+      - go build -o {{.BINARY}} .
 
   dev:
     desc: 编译并启动开发服务器
     deps: [build]
     cmds:
-      - ./show-me-the-story.exe
+      - ./{{.BINARY}}
 
   clean:
     desc: 清理编译产物
     cmds:
-      - Remove-Item -Force -ErrorAction SilentlyContinue show-me-the-story.exe
+      - cmd: rm -f show-me-the-story show-me-the-story.exe
+        platforms: [linux, darwin]
+      - cmd: Remove-Item -Force -ErrorAction SilentlyContinue show-me-the-story.exe
+        platforms: [windows]
