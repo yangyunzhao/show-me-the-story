@@ -83,6 +83,7 @@ task dev                              # 编译并启动 Go 后端
 | `prompts.go` | `RenderPrompt`（`{{.KeyName}}` 替换）、`DefaultPrompts` 变量（所有内置提示词模板） |
 | `filesys.go` | `writeFileImpl`、`deleteFileImpl`、`renameFileImpl` |
 | `embeds/skills/*.md` | 内置 Skill 文件（YAML frontmatter + prompt body），通过 `//go:embed` 嵌入 |
+| `.github/workflows/release.yml` | GitHub Actions 发布流程：推送 `v*` tag 时校验 tag 在 main 分支上，构建前端 + 交叉编译 5 个目标（linux/windows/macOS × amd64/arm64，windows 仅 amd64），打包 tar.gz/zip 并用 `gh` 创建 Release |
 
 ### 前端文件（`frontend/`）
 
