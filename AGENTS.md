@@ -11,6 +11,7 @@
 - **默认端口**：`:48090`（可通过 `PORT` 环境变量覆盖）
 - **前端**：Vite 5 + Svelte 4 + Tailwind CSS 4 + DaisyUI 5（xianii 暗色主题）
 - **项目目录**：`storys/`（程序同目录下，每个故事项目一个子目录）
+- **许可证**：MIT（见根目录 `LICENSE`）
 
 ## 编译与运行
 
