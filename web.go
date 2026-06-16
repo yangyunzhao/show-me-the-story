@@ -34,6 +34,7 @@ func startWebServer(apiCfg *APIConfig, apiCfgPath string, cfg *Config, state *Pr
 	// API config (global, always available)
 	mux.HandleFunc("GET /api/config/api", h.GetAPIConfig)
 	mux.HandleFunc("PUT /api/config/api", h.PutAPIConfig)
+	mux.HandleFunc("POST /api/config/api/test", h.PostAPITest)
 
 	// Project-scoped endpoints (require project selection)
 	mux.HandleFunc("GET /api/config", h.GetConfig)
