@@ -289,6 +289,48 @@ func (h *Handlers) PutAPIConfig(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, http.StatusOK, h.apiCfg)
 }
 
+func (h *Handlers) PostAPITest(w http.ResponseWriter, r *http.Request) {
+	if h.rejectIfTaskRunning(w) {
+		return
+	}
+	var testCfg APIConfig
+	if err := json.NewDecoder(r.Body).Decode(&testCfg); err != nil {
+		h.writeError(w, http.StatusBadRequest, "无效的JSON: "+err.Error())
+		return
+	}
+	if err := validateAPIConfig(&testCfg); err != nil {
+		h.writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	resp, err := CallAPIMessages(ctx, &testCfg, []Message{
+		{Role: "user", Content: "Hi"},
+	})
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			h.writeError(w, http.StatusGatewayTimeout, "连接超时（15秒）")
+			return
+		}
+		h.writeError(w, http.StatusBadGateway, "测试失败: "+err.Error())
+		return
+	}
+
+	result := map[string]interface{}{
+		"success": true,
+		"message": "连接成功",
+		"model":   testCfg.Model,
+	}
+	if len(resp) > 100 {
+		result["sample"] = resp[:100] + "..."
+	} else {
+		result["sample"] = resp
+	}
+	h.writeJSON(w, http.StatusOK, result)
+}
+
 func (h *Handlers) GetConfig(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, http.StatusOK, h.cfg)
 }

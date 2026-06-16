@@ -31,6 +31,7 @@
 
   let localApiCfg = { base_url: '', model: '', api_key: '', http_timeout_seconds: 300, context_budget_tokens: 900000 };
   let localStoryCfg = { type: '', title: '', chapter_count: 30, target_words_per_chapter: 2500, writing_style: '', story_synopsis: '' };
+  let testingApi = false;
 
   let apiCfgSnapshot = '';
   let storyCfgSnapshot = '';
@@ -97,6 +98,18 @@
       apiConfig.set({ ...localApiCfg });
       addToast('API 配置已保存', 'success');
     } catch (e) { addToast(e.message, 'error'); }
+  }
+
+  async function testAPIConfig() {
+    testingApi = true;
+    try {
+      const res = await api('POST', '/api/config/api/test', localApiCfg);
+      addToast(`连接成功！模型 ${res.model} 正常响应`, 'success');
+    } catch (e) {
+      addToast(e.message, 'error');
+    } finally {
+      testingApi = false;
+    }
   }
 
   // 直接保存故事配置（不经过 AI），存在已确认章节且关键设定有变化时提示协调
@@ -344,27 +357,34 @@
         <div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
           <div class="col-span-2">
             <label class="text-xs text-base-content/50 mb-0.5 block">API Base URL</label>
-            <input type="text" class="input input-sm w-full" bind:value={localApiCfg.base_url} placeholder="https://api.example.com/v1/" disabled={$taskRunning} />
+            <input type="text" class="input input-sm w-full" bind:value={localApiCfg.base_url} placeholder="https://api.example.com/v1/" disabled={$taskRunning || testingApi} />
           </div>
           <div>
             <label class="text-xs text-base-content/50 mb-0.5 block">Model</label>
-            <input type="text" class="input input-sm w-full" bind:value={localApiCfg.model} placeholder="gpt-4" disabled={$taskRunning} />
+            <input type="text" class="input input-sm w-full" bind:value={localApiCfg.model} placeholder="gpt-4" disabled={$taskRunning || testingApi} />
           </div>
           <div>
             <label class="text-xs text-base-content/50 mb-0.5 block">HTTP 超时（秒）</label>
-            <input type="number" class="input input-sm w-full" bind:value={localApiCfg.http_timeout_seconds} disabled={$taskRunning} />
+            <input type="number" class="input input-sm w-full" bind:value={localApiCfg.http_timeout_seconds} disabled={$taskRunning || testingApi} />
           </div>
           <div class="col-span-2">
             <label class="text-xs text-base-content/50 mb-0.5 block">上下文预算（tokens）</label>
-            <input type="number" class="input input-sm w-full" bind:value={localApiCfg.context_budget_tokens} placeholder="900000" disabled={$taskRunning} title="全书优化时估算上下文用量，默认 900000（约 1M 模型）" />
+            <input type="number" class="input input-sm w-full" bind:value={localApiCfg.context_budget_tokens} placeholder="900000" disabled={$taskRunning || testingApi} title="全书优化时估算上下文用量，默认 900000（约 1M 模型）" />
           </div>
           <div class="col-span-2">
             <label class="text-xs text-base-content/50 mb-0.5 block">API Key</label>
-            <input type="password" class="input input-sm w-full" bind:value={localApiCfg.api_key} placeholder="sk-..." disabled={$taskRunning} />
+            <input type="password" class="input input-sm w-full" bind:value={localApiCfg.api_key} placeholder="sk-..." disabled={$taskRunning || testingApi} />
           </div>
         </div>
-        <div class="flex justify-end">
-          <button class="btn btn-primary btn-xs" on:click={saveAPIConfig} disabled={$taskRunning}>保存</button>
+        <div class="flex justify-end gap-2">
+          <button class="btn btn-outline btn-xs" on:click={testAPIConfig} disabled={$taskRunning || testingApi}>
+            {#if testingApi}
+              <span class="loading loading-spinner loading-xs"></span>测试中...
+            {:else}
+              测试连接
+            {/if}
+          </button>
+          <button class="btn btn-primary btn-xs" on:click={saveAPIConfig} disabled={$taskRunning || testingApi}>保存</button>
         </div>
       </div>
     </div>
