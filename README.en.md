@@ -35,6 +35,8 @@ The program ships with no story content of its own — the genre, world, charact
 
 Download the release for your platform, or build it yourself (see the "Development" section at the bottom).
 
+> **Windows users**: On first launch you may see a "Windows protected your PC" SmartScreen warning showing "Unknown publisher". This is because the app does not have a code signing certificate. Click "More info" → "Run anyway" to proceed, or right-click the exe → Properties → check "Unblock" → OK.
+
 ### 2. Run
 
 ```bash
