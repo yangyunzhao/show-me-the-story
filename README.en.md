@@ -35,7 +35,11 @@ The program ships with no story content of its own — the genre, world, charact
 
 Download the release for your platform, or build it yourself (see the "Development" section at the bottom).
 
+> [!WARNING]
 > **Windows users**: On first launch you may see a "Windows protected your PC" SmartScreen warning showing "Unknown publisher". This is because the app does not have a code signing certificate. Click "More info" → "Run anyway" to proceed, or right-click the exe → Properties → check "Unblock" → OK.
+
+> [!NOTE]
+> The program only requests network access to call the LLM API and check for version updates. No user data is collected or uploaded.
 
 ### 2. Run
 
