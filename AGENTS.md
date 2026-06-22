@@ -26,8 +26,8 @@ cd frontend && npm install && npm run build && cd ..   # 构建前端
 go build -o show-me-the-story.exe .                    # 编译 Go（嵌入 frontend/dist/）
 
 # 运行
-./show-me-the-story.exe               # 运行（默认当前目录为项目目录）
-./show-me-the-story.exe ./my-novel/   # 指定项目目录运行
+./show-me-the-story.exe ./my-novel/   # 推荐：显式指定数据/项目基础目录运行
+./show-me-the-story.exe               # 也可不带参数，此时默认当前目录为数据/项目基础目录
 
 # 开发模式
 task dev:frontend                     # 启动 Vite dev server（热重载，端口 5173，代理 /api → :48090）

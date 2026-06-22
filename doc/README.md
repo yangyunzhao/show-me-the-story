@@ -84,10 +84,18 @@ task build
 
 ### 1.5 启动服务
 
-在仓库根目录运行：
+程序启动时可以带一个目录参数，这个目录就是程序数据目录。`api.json`、`sessions/` 和 `storys/` 都会放在这个目录下。建议显式指定一个专用数据目录，避免把运行数据混在源码仓库里。
+
+先创建数据目录：
 
 ```powershell
-.\show-me-the-story.exe
+New-Item -ItemType Directory -Force D:\show-me-the-story-data
+```
+
+然后启动服务：
+
+```powershell
+.\show-me-the-story.exe D:\show-me-the-story-data
 ```
 
 浏览器打开：
@@ -100,8 +108,16 @@ http://localhost:48090
 
 ```powershell
 $env:PORT="48100"
+.\show-me-the-story.exe D:\show-me-the-story-data
+```
+
+不带目录参数也可以运行：
+
+```powershell
 .\show-me-the-story.exe
 ```
+
+这种情况下程序会把当前工作目录当作数据目录。`main.go` 的规则是：如果第一个命令行参数是一个已存在目录，就使用该目录；否则使用当前目录。
 
 ### 1.6 开发模式启动
 
@@ -111,7 +127,8 @@ $env:PORT="48100"
 
 ```powershell
 go build -o show-me-the-story.exe .
-.\show-me-the-story.exe
+New-Item -ItemType Directory -Force D:\show-me-the-story-data
+.\show-me-the-story.exe D:\show-me-the-story-data
 ```
 
 终端 2：启动前端开发服务：
