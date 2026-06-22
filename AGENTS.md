@@ -13,7 +13,7 @@
 - **项目目录**：`storys/`（程序同目录下，每个故事项目一个子目录）
 - **多语言**：每个项目在创建时选择 `zh` / `en`，决定 AI 提示词、生成正文、内置技能与 Agent 系统提示；前端 UI 语言独立可切换
 - **许可证**：MIT（见根目录 `LICENSE`）
-- **文档**：根目录 [`README.md`](README.md)（中文）+ [`README.en.md`](README.en.md)（英文，首行链接互通）
+- **文档**：根目录 [`README.md`](README.md)（中文）+ [`README.en.md`](README.en.md)（英文，首行链接互通）；[`doc/FORK_UPSTREAM_SYNC.md`](doc/FORK_UPSTREAM_SYNC.md) 记录从官方仓库同步 fork、由 Codex CLI 本地处理冲突的操作手册
 
 ## 编译与运行
 
