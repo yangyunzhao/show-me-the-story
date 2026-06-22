@@ -2,7 +2,7 @@
 
 > English documentation: [README.en.md](README.en.md)
 
-一个开箱即用的长篇小说 AI 创作工具。单个可执行文件，内置完整 Web 界面，连接任意 OpenAI 兼容 API（OpenAI、DeepSeek、本地 Ollama / LM Studio 等）即可自动生成大纲并逐章创作长篇小说。
+一个开箱即用的长篇小说 AI 创作工具。单个可执行文件，内置完整 Web 界面，连接任意 OpenAI 兼容 API（OpenAI、DeepSeek、本地 Ollama / LM Studio 等）或本机已登录的 Codex CLI，即可自动生成大纲并逐章创作长篇小说。
 
 程序本身不包含任何小说内容——故事类型、世界观、角色、写作风格全部由你配置，或交给 AI 自动生成。
 
@@ -50,15 +50,24 @@
 
 启动后访问 `http://localhost:48090`（端口可通过环境变量 `PORT` 修改）。
 
-### 3. 配置 API
+### 3. 配置模型
 
-首次进入会提示创建项目。创建后在「配置」页填写：
+首次进入会提示创建项目。创建后在「配置」页选择模型提供方：
 
-- **API 地址**：任意 OpenAI 兼容接口，如 `https://api.deepseek.com`、`http://localhost:11434/v1`（带不带 `/v1` 均可）
-- **模型名称**：如 `deepseek-chat`、`gpt-4o` 等
-- **API Key**：本地模型可留空
+- **OpenAI Compatible API**：填写 API 地址（如 `https://api.deepseek.com`、`http://localhost:11434/v1`，带不带 `/v1` 均可）、模型名称（如 `deepseek-chat`、`gpt-4o`）和 API Key（本地模型可留空）。
+- **Codex 订阅**：使用本机 `codex` 命令和已登录的 Codex 账号。使用前请先在终端完成 `codex login`；本应用不会读取或保存 Codex token，也不需要 OpenAI API Key。需要填写 Codex 模型名；Codex 工作目录建议留空使用安全默认目录，或指定一个空目录/专用目录，不要使用源码目录、用户主目录或磁盘根目录。
 
-API 配置全局共享，所有项目通用。
+`codex_use_streaming` 开启后可让 Codex 模式接入章节流式输出；关闭时非流式任务仍可工作，但直接章节流式路径不可用。API 配置全局共享，所有项目通用。
+
+Codex 常见排障：
+
+- 提示找不到 `codex`：确认已安装 Codex CLI，且启动本应用的终端能在 `PATH` 中找到 `codex`。
+- 提示未登录或认证失败：先在终端运行 `codex login`，再回到配置页测试连接。
+- 提示模型不可用：检查配置页的 `Codex model` 是否为当前账号可用的模型名。
+- 如果使用 ChatGPT 账号登录 Codex CLI，不要假设 `gpt-5-codex` 一定可用；可运行 `codex doctor`，优先使用输出中 `Configuration` 下显示的默认 `model`。
+- 提示工作目录不安全：换成空目录或专用目录；不要使用源码目录、用户主目录或磁盘根目录。
+- Codex 连接测试最多等待 90 秒；测试开始、成功、失败或超时会输出到命令行和右侧日志面板，便于排查。
+- 连接测试成功响应只返回模型名和响应字符数，不回传模型正文 sample，避免在日志或页面里暴露完整输出。
 
 ### 4. 开始创作
 
@@ -120,7 +129,7 @@ planted（已埋设）→ progressing（推进中）→ resolved（已回收）
 
 ```
 <数据目录>/
-├── api.json                 # API 配置（全局共享）
+├── api.json                 # 模型 Provider / API 配置（全局共享）
 └── storys/
     └── <项目名>/
         ├── config.json      # 故事配置 + 提示词 + 技能开关
@@ -135,7 +144,7 @@ planted（已埋设）→ progressing（推进中）→ resolved（已回收）
 ## 注意事项
 
 - 同一时间只允许一个 AI 任务运行，任务进行中编辑操作会被暂时禁用，可随时点「停止」中断任务
-- 网络瞬时故障会自动重试（指数退避）；API Key 无效等致命错误会立即停止并提示
+- 网络瞬时故障会自动重试（指数退避）；API Key 无效、Codex 配置错误、Codex CLI 不可用等致命错误会立即停止并提示
 - 高级用户可在 `config.json` 的 `prompts` 字段覆盖任意内置提示词模板（占位符格式为 `{{.KeyName}}`）
 
 ---

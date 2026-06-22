@@ -30,7 +30,25 @@
   $: cfgKey = $apiConfig?.api_key || '';
   $: cfgTimeout = $apiConfig?.http_timeout_seconds || 300;
 
-  let localApiCfg = { base_url: '', model: '', api_key: '', http_timeout_seconds: 300, max_tokens: 0, context_budget_tokens: 900000 };
+  const PROVIDER_OPENAI = 'openai_compatible';
+  const PROVIDER_CODEX = 'codex';
+
+  function normalizeLocalApiCfg(cfg = {}) {
+    return {
+      provider: cfg.provider || PROVIDER_OPENAI,
+      base_url: cfg.base_url || '',
+      model: cfg.model || '',
+      api_key: cfg.api_key || '',
+      http_timeout_seconds: cfg.http_timeout_seconds || 300,
+      max_tokens: cfg.max_tokens || 0,
+      context_budget_tokens: cfg.context_budget_tokens || 900000,
+      codex_model: cfg.codex_model || '',
+      codex_working_dir: cfg.codex_working_dir || '',
+      codex_use_streaming: Boolean(cfg.codex_use_streaming),
+    };
+  }
+
+  let localApiCfg = normalizeLocalApiCfg();
   let localStoryCfg = { type: '', title: '', chapter_count: 30, target_words_per_chapter: 2500, writing_style: '', writing_pov: '', story_synopsis: '' };
   let testingApi = false;
 
@@ -40,7 +58,7 @@
   $: if ($apiConfig) {
     const snap = JSON.stringify($apiConfig);
     if (snap !== apiCfgSnapshot) {
-      localApiCfg = { ...$apiConfig };
+      localApiCfg = normalizeLocalApiCfg($apiConfig);
       apiCfgSnapshot = snap;
     }
   }
@@ -59,6 +77,7 @@
   $: filteredWvs = $wvFilter === 'all' ? allWvs : allWvs.filter(w => w.category === $wvFilter);
   $: orgs = ($settings?.organizations || []);
   $: rels = ($settings?.relations || []);
+  $: selectedProvider = localApiCfg.provider || PROVIDER_OPENAI;
 
   const entityIcons = { character: '👤', organization: '🏛️', worldview: '🌍' };
 
@@ -101,8 +120,10 @@
 
   async function saveAPIConfig() {
     try {
-      await api('PUT', '/api/config/api', localApiCfg);
-      apiConfig.set({ ...localApiCfg });
+      const saved = normalizeLocalApiCfg(await api('PUT', '/api/config/api', normalizeLocalApiCfg(localApiCfg)));
+      localApiCfg = saved;
+      apiCfgSnapshot = JSON.stringify(saved);
+      apiConfig.set(saved);
       addToast($t('config.api.saved'), 'success');
     } catch (e) { addToast(e.message, 'error'); }
   }
@@ -110,7 +131,7 @@
   async function testAPIConfig() {
     testingApi = true;
     try {
-      const res = await api('POST', '/api/config/api/test', localApiCfg);
+      const res = await api('POST', '/api/config/api/test', normalizeLocalApiCfg(localApiCfg));
       addToast($t('config.api.testOk', { model: res.model }), 'success');
     } catch (e) {
       addToast(e.message, 'error');
@@ -364,28 +385,74 @@
         <h3 class="card-title text-base">{$t('config.api.title')}</h3>
         <div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
           <div class="col-span-2">
-            <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.baseUrl')}</span>
-            <input type="text" class="input input-sm w-full" bind:value={localApiCfg.base_url} placeholder="https://api.example.com/v1/" disabled={$taskRunning || testingApi} />
+            <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.provider')}</span>
+            <div class="join w-full">
+              <button
+                type="button"
+                class="btn btn-sm join-item flex-1 {selectedProvider === PROVIDER_OPENAI ? 'btn-primary' : 'btn-outline'}"
+                on:click={() => localApiCfg.provider = PROVIDER_OPENAI}
+                disabled={$taskRunning || testingApi}
+              >
+                {$t('config.api.provider.openai')}
+              </button>
+              <button
+                type="button"
+                class="btn btn-sm join-item flex-1 {selectedProvider === PROVIDER_CODEX ? 'btn-primary' : 'btn-outline'}"
+                on:click={() => localApiCfg.provider = PROVIDER_CODEX}
+                disabled={$taskRunning || testingApi}
+              >
+                {$t('config.api.provider.codex')}
+              </button>
+            </div>
+            <p class="text-xs text-base-content/50 mt-1">
+              {selectedProvider === PROVIDER_CODEX ? $t('config.api.provider.codexHint') : $t('config.api.provider.openaiHint')}
+            </p>
           </div>
-          <div>
-            <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.model')}</span>
-            <input type="text" class="input input-sm w-full" bind:value={localApiCfg.model} placeholder="gpt-4" disabled={$taskRunning || testingApi} />
-          </div>
-          <div>
-            <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.timeout')}</span>
-            <input type="number" class="input input-sm w-full" bind:value={localApiCfg.http_timeout_seconds} disabled={$taskRunning || testingApi} />
-          </div>
-          <div>
-            <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.maxTokens')}</span>
-            <input type="number" class="input input-sm w-full" bind:value={localApiCfg.max_tokens} placeholder="{$t('config.api.maxTokens.placeholder')}" disabled={$taskRunning || testingApi} title={$t('config.api.maxTokens.tooltip')} />
-          </div>
+          {#if selectedProvider === PROVIDER_CODEX}
+            <div>
+              <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.codexModel')}</span>
+              <input type="text" class="input input-sm w-full" bind:value={localApiCfg.codex_model} placeholder="gpt-5-codex" disabled={$taskRunning || testingApi} />
+            </div>
+            <div>
+              <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.codexStreaming')}</span>
+              <label class="flex min-h-8 items-start gap-2">
+                <input type="checkbox" class="toggle toggle-sm toggle-primary" bind:checked={localApiCfg.codex_use_streaming} disabled={$taskRunning || testingApi} />
+                <span class="text-xs leading-snug text-base-content/60">{$t('config.api.codexStreamingHint')}</span>
+              </label>
+            </div>
+            <div class="col-span-2">
+              <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.codexWorkingDir')}</span>
+              <input type="text" class="input input-sm w-full" bind:value={localApiCfg.codex_working_dir} placeholder="D:\story-codex-work" disabled={$taskRunning || testingApi} />
+              <p class="text-xs text-base-content/50 mt-1">{$t('config.api.codexWorkingDirHint')}</p>
+            </div>
+            <div class="col-span-2 alert alert-info text-xs py-1.5 px-3">
+              <span>{$t('config.api.codexLoginHint')}</span>
+            </div>
+          {:else}
+            <div class="col-span-2">
+              <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.baseUrl')}</span>
+              <input type="text" class="input input-sm w-full" bind:value={localApiCfg.base_url} placeholder="https://api.example.com/v1/" disabled={$taskRunning || testingApi} />
+            </div>
+            <div>
+              <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.model')}</span>
+              <input type="text" class="input input-sm w-full" bind:value={localApiCfg.model} placeholder="gpt-4" disabled={$taskRunning || testingApi} />
+            </div>
+            <div>
+              <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.timeout')}</span>
+              <input type="number" class="input input-sm w-full" bind:value={localApiCfg.http_timeout_seconds} disabled={$taskRunning || testingApi} />
+            </div>
+            <div>
+              <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.maxTokens')}</span>
+              <input type="number" class="input input-sm w-full" bind:value={localApiCfg.max_tokens} placeholder="{$t('config.api.maxTokens.placeholder')}" disabled={$taskRunning || testingApi} title={$t('config.api.maxTokens.tooltip')} />
+            </div>
+            <div class="col-span-2">
+              <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.key')}</span>
+              <input type="password" class="input input-sm w-full" bind:value={localApiCfg.api_key} placeholder="sk-..." disabled={$taskRunning || testingApi} />
+            </div>
+          {/if}
           <div class="col-span-2">
             <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.budget')}</span>
             <input type="number" class="input input-sm w-full" bind:value={localApiCfg.context_budget_tokens} placeholder="900000" disabled={$taskRunning || testingApi} title={$t('config.api.budget.tooltip')} />
-          </div>
-          <div class="col-span-2">
-            <span class="text-xs text-base-content/50 mb-0.5 block">{$t('config.api.key')}</span>
-            <input type="password" class="input input-sm w-full" bind:value={localApiCfg.api_key} placeholder="sk-..." disabled={$taskRunning || testingApi} />
           </div>
         </div>
         <div class="flex justify-end gap-2">

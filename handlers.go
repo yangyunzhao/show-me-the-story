@@ -25,14 +25,14 @@ type Handlers struct {
 	projectMu   sync.RWMutex
 
 	// Per-project state (updated on switchProject)
-	cfg          *Config
-	cfgPath      string
-	state        *Progress
-	progressPath string
-	settings     *ProjectSettings
-	settingsPath string
-	skills       []Skill
-	sessionsDir  string
+	cfg             *Config
+	cfgPath         string
+	state           *Progress
+	progressPath    string
+	settings        *ProjectSettings
+	settingsPath    string
+	skills          []Skill
+	sessionsDir     string
 	postprocess     *PostProcessState
 	postprocessPath string
 
@@ -275,16 +275,7 @@ func (h *Handlers) PutAPIConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if newCfg.HTTPTimeoutSeconds <= 0 {
-		newCfg.HTTPTimeoutSeconds = 300
-	}
-	if newCfg.ContextBudgetTokens <= 0 {
-		if window := FetchModelContextWindow(&newCfg); window > 0 {
-			newCfg.ContextBudgetTokens = window
-		} else {
-			newCfg.ContextBudgetTokens = defaultContextBudgetTokens
-		}
-	}
+	normalizeAPIConfig(&newCfg)
 
 	data, err := json.MarshalIndent(newCfg, "", "  ")
 	if err != nil {
@@ -300,6 +291,13 @@ func (h *Handlers) PutAPIConfig(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, http.StatusOK, h.apiCfg)
 }
 
+var apiTestTimeoutForProvider = func(cfg APIConfig) time.Duration {
+	if cfg.Provider == ProviderCodex {
+		return 90 * time.Second
+	}
+	return 15 * time.Second
+}
+
 func (h *Handlers) PostAPITest(w http.ResponseWriter, r *http.Request) {
 	if h.rejectIfTaskRunning(w, r) {
 		return
@@ -309,12 +307,24 @@ func (h *Handlers) PostAPITest(w http.ResponseWriter, r *http.Request) {
 		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", err.Error())
 		return
 	}
+	normalizeAPIConfig(&testCfg)
 	if err := validateAPIConfig(&testCfg); err != nil {
 		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", err.Error())
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	timeout := apiTestTimeoutForProvider(testCfg)
+	providerName := string(testCfg.Provider)
+	modelName := testCfg.Model
+	if testCfg.Provider == ProviderCodex {
+		modelName = testCfg.CodexModel
+	}
+	h.logger.InfoBilingual(
+		fmt.Sprintf("正在测试模型连接：provider=%s model=%s timeout=%d秒", providerName, modelName, durationSeconds(timeout)),
+		fmt.Sprintf("Testing model connection: provider=%s model=%s timeout=%ds", providerName, modelName, durationSeconds(timeout)),
+	)
+
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
 	resp, err := CallAPIMessages(ctx, &testCfg, []Message{
@@ -322,24 +332,44 @@ func (h *Handlers) PostAPITest(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			h.writeErrorReq(w, r, http.StatusGatewayTimeout, "api_test_timeout")
+			h.logger.WarnBilingual(
+				fmt.Sprintf("模型连接测试超时：provider=%s model=%s timeout=%d秒", providerName, modelName, durationSeconds(timeout)),
+				fmt.Sprintf("Model connection test timed out: provider=%s model=%s timeout=%ds", providerName, modelName, durationSeconds(timeout)),
+			)
+			h.writeErrorReq(w, r, http.StatusGatewayTimeout, "api_test_timeout", durationSeconds(timeout))
 			return
 		}
-		h.writeErrorReq(w, r, http.StatusBadGateway, "api_test_failed", err.Error())
+		errMsg := redactSensitiveText(err.Error())
+		h.logger.ErrorBilingual(
+			fmt.Sprintf("模型连接测试失败：provider=%s model=%s error=%s", providerName, modelName, errMsg),
+			fmt.Sprintf("Model connection test failed: provider=%s model=%s error=%s", providerName, modelName, errMsg),
+		)
+		h.writeErrorReq(w, r, http.StatusBadGateway, "api_test_failed", errMsg)
 		return
 	}
 
+	h.logger.SuccessBilingual(
+		fmt.Sprintf("模型连接测试成功：provider=%s model=%s response_chars=%d", providerName, modelName, len([]rune(resp))),
+		fmt.Sprintf("Model connection test succeeded: provider=%s model=%s response_chars=%d", providerName, modelName, len([]rune(resp))),
+	)
+
 	result := map[string]interface{}{
-		"success": true,
-		"message": "连接成功",
-		"model":   testCfg.Model,
+		"success":        true,
+		"message":        "连接成功",
+		"model":          testCfg.Model,
+		"response_chars": len([]rune(resp)),
 	}
-	if len(resp) > 100 {
-		result["sample"] = resp[:100] + "..."
-	} else {
-		result["sample"] = resp
+	if testCfg.Provider == ProviderCodex {
+		result["model"] = testCfg.CodexModel
 	}
 	h.writeJSON(w, http.StatusOK, result)
+}
+
+func durationSeconds(d time.Duration) int {
+	if d <= 0 {
+		return 0
+	}
+	return int((d + time.Second - 1) / time.Second)
 }
 
 func (h *Handlers) GetConfig(w http.ResponseWriter, r *http.Request) {

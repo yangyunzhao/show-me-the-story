@@ -185,8 +185,8 @@ var errorCatalog = map[string]map[string]string{
 		LangEN: "Failed to serialise API config: %s",
 	},
 	"api_test_timeout": {
-		LangZH: "连接超时（15秒）",
-		LangEN: "Connection timed out (15s)",
+		LangZH: "连接超时（%d秒）",
+		LangEN: "Connection timed out (%ds)",
 	},
 	"api_test_failed": {
 		LangZH: "测试失败: %s",

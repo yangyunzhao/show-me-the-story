@@ -4,15 +4,28 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
+)
+
+type APIProviderType string
+
+const (
+	ProviderOpenAICompatible APIProviderType = "openai_compatible"
+	ProviderCodex            APIProviderType = "codex"
 )
 
 type APIConfig struct {
-	APIKey               string `json:"api_key"`
-	BaseURL              string `json:"base_url"`
-	Model                string `json:"model"`
-	MaxTokens            int    `json:"max_tokens,omitempty"`           // 0 = 模型默认；Agent 调用建议 ≥ 8192
-	HTTPTimeoutSeconds   int    `json:"http_timeout_seconds"`
-	ContextBudgetTokens  int    `json:"context_budget_tokens"` // 全书优化上下文预算，默认 900000
+	Provider            APIProviderType `json:"provider"`
+	APIKey              string          `json:"api_key"`
+	BaseURL             string          `json:"base_url"`
+	Model               string          `json:"model"`
+	MaxTokens           int             `json:"max_tokens,omitempty"` // 0 = 模型默认；Agent 调用建议 ≥ 8192
+	HTTPTimeoutSeconds  int             `json:"http_timeout_seconds"`
+	ContextBudgetTokens int             `json:"context_budget_tokens"` // 全书优化上下文预算，默认 900000
+	CodexModel          string          `json:"codex_model,omitempty"`
+	CodexWorkingDir     string          `json:"codex_working_dir,omitempty"`
+	CodexUseStreaming   bool            `json:"codex_use_streaming,omitempty"`
 }
 
 type Config struct {
@@ -70,8 +83,34 @@ type PromptsConfig struct {
 
 func DefaultAPIConfig() *APIConfig {
 	return &APIConfig{
+		Provider:            ProviderOpenAICompatible,
 		HTTPTimeoutSeconds:  300,
 		ContextBudgetTokens: defaultContextBudgetTokens,
+	}
+}
+
+func normalizeAPIConfig(cfg *APIConfig) {
+	if cfg == nil {
+		return
+	}
+	if cfg.Provider == "" {
+		cfg.Provider = ProviderOpenAICompatible
+	}
+	if cfg.Provider == ProviderCodex && strings.TrimSpace(cfg.CodexWorkingDir) == "" {
+		cfg.CodexWorkingDir = filepath.Join(os.TempDir(), "show-me-the-story-codex")
+	}
+	if cfg.HTTPTimeoutSeconds <= 0 {
+		cfg.HTTPTimeoutSeconds = 300
+	}
+	if cfg.ContextBudgetTokens <= 0 {
+		if cfg.Provider == ProviderOpenAICompatible {
+			if window := FetchModelContextWindow(cfg); window > 0 {
+				cfg.ContextBudgetTokens = window
+			}
+		}
+		if cfg.ContextBudgetTokens <= 0 {
+			cfg.ContextBudgetTokens = defaultContextBudgetTokens
+		}
 	}
 }
 
@@ -113,17 +152,7 @@ func LoadAPIConfig(path string) (*APIConfig, error) {
 		return nil, fmt.Errorf("解析API配置文件失败: %w", err)
 	}
 
-	if cfg.HTTPTimeoutSeconds <= 0 {
-		cfg.HTTPTimeoutSeconds = 300
-	}
-	if cfg.ContextBudgetTokens <= 0 {
-		// 先尝试从 API 获取模型的上下文窗口
-		if window := FetchModelContextWindow(&cfg); window > 0 {
-			cfg.ContextBudgetTokens = window
-		} else {
-			cfg.ContextBudgetTokens = defaultContextBudgetTokens
-		}
-	}
+	normalizeAPIConfig(&cfg)
 
 	return &cfg, nil
 }

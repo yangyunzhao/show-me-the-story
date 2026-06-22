@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -42,6 +43,42 @@ type ChatResponse struct {
 	Usage *tokenUsage `json:"usage,omitempty"`
 }
 
+type LLMRequest struct {
+	Messages []Message
+}
+
+type LLMResponse struct {
+	Content string
+}
+
+type LLMProvider interface {
+	Generate(ctx context.Context, req LLMRequest) (*LLMResponse, error)
+	Stream(ctx context.Context, req LLMRequest, onChunk func(string)) (*LLMResponse, error)
+}
+
+var errProviderStreamUnsupported = errors.New("provider stream unsupported")
+
+type OpenAIProvider struct {
+	cfg APIConfig
+}
+
+func providerFromConfig(apiCfg *APIConfig) (LLMProvider, error) {
+	if apiCfg == nil {
+		return nil, fmt.Errorf("API 配置为空")
+	}
+	cfg := *apiCfg
+	normalizeAPIConfig(&cfg)
+
+	switch cfg.Provider {
+	case ProviderOpenAICompatible:
+		return &OpenAIProvider{cfg: cfg}, nil
+	case ProviderCodex:
+		return &CodexProvider{cfg: cfg}, nil
+	default:
+		return nil, fmt.Errorf("不支持的模型提供方: %s", cfg.Provider)
+	}
+}
+
 func normalizeURL(base string) string {
 	base = strings.TrimSpace(base)
 	base = strings.TrimSuffix(base, "/")
@@ -58,6 +95,13 @@ func normalizeURL(base string) string {
 // FetchModelContextWindow 从 API 的 /models 端点获取指定模型的上下文窗口大小。
 // 成功返回 context_window > 0，失败返回 0（调用方应使用默认值）。
 func FetchModelContextWindow(apiCfg *APIConfig) int {
+	provider := ProviderOpenAICompatible
+	if apiCfg != nil && apiCfg.Provider != "" {
+		provider = apiCfg.Provider
+	}
+	if provider != ProviderOpenAICompatible {
+		return 0
+	}
 	if apiCfg == nil || strings.TrimSpace(apiCfg.BaseURL) == "" || strings.TrimSpace(apiCfg.Model) == "" {
 		return 0
 	}
@@ -102,18 +146,40 @@ func FetchModelContextWindow(apiCfg *APIConfig) int {
 }
 
 func validateAPIConfig(apiCfg *APIConfig) error {
-	if strings.TrimSpace(apiCfg.BaseURL) == "" {
-		return fmt.Errorf("API Base URL 未配置")
+	if apiCfg == nil {
+		return fmt.Errorf("API 配置为空")
 	}
-	if strings.TrimSpace(apiCfg.Model) == "" {
-		return fmt.Errorf("Model 未配置")
+	cfg := *apiCfg
+	normalizeAPIConfig(&cfg)
+
+	switch cfg.Provider {
+	case ProviderOpenAICompatible:
+		if strings.TrimSpace(cfg.BaseURL) == "" {
+			return fmt.Errorf("API Base URL 未配置")
+		}
+		if strings.TrimSpace(cfg.Model) == "" {
+			return fmt.Errorf("Model 未配置")
+		}
+		return nil
+	case ProviderCodex:
+		if strings.TrimSpace(cfg.CodexModel) == "" {
+			return fmt.Errorf("Codex model not configured")
+		}
+		if strings.TrimSpace(cfg.CodexWorkingDir) == "" {
+			return fmt.Errorf("Codex working directory not configured")
+		}
+		return nil
+	default:
+		return fmt.Errorf("不支持的模型提供方: %s", cfg.Provider)
 	}
-	return nil
 }
 
 func isFatalAPIError(err error) bool {
 	if err == nil {
 		return false
+	}
+	if errors.Is(err, errProviderStreamUnsupported) {
+		return true
 	}
 	msg := err.Error()
 	// 注意：不要把所有 "dial tcp" 都当作致命错误——
@@ -128,6 +194,19 @@ func isFatalAPIError(err error) bool {
 		return true
 	}
 	if strings.Contains(msg, "context canceled") {
+		return true
+	}
+	if strings.Contains(msg, "API 配置为空") ||
+		strings.Contains(msg, "不支持的模型提供方") {
+		return true
+	}
+	if strings.Contains(msg, "Codex model") ||
+		strings.Contains(msg, "Codex working directory") ||
+		strings.Contains(msg, "codex executable not found") ||
+		strings.Contains(msg, "codex app-server") ||
+		strings.Contains(msg, "codex turn failed") ||
+		strings.Contains(msg, "codex turn interrupted") ||
+		strings.Contains(msg, "turn/start failed") {
 		return true
 	}
 	return false
@@ -156,74 +235,85 @@ func CallAPIMessages(ctx context.Context, apiCfg *APIConfig, messages []Message)
 	if result != "" {
 		return result, err
 	}
-	if err != nil && isFatalAPIError(err) {
+	if err != nil && isFatalAPIError(err) && !errors.Is(err, errProviderStreamUnsupported) {
 		return "", err
 	}
-	// ponytail: fallback for providers with broken stream; loses in-flight stream estimate only.
-	return callAPIMessagesSync(ctx, apiCfg, messages)
+	// Fall back for providers whose stream path is unavailable.
+	provider, providerErr := providerFromConfig(apiCfg)
+	if providerErr != nil {
+		return "", providerErr
+	}
+	resp, err := provider.Generate(ctx, LLMRequest{Messages: messages})
+	if err != nil {
+		return "", err
+	}
+	if resp == nil {
+		return "", fmt.Errorf("接口未响应有效 Choices 文本")
+	}
+	return resp.Content, nil
 }
 
-// callAPIMessagesSync 同步 HTTP 调用（仅作流式失败时的回退）。
-func callAPIMessagesSync(ctx context.Context, apiCfg *APIConfig, messages []Message) (string, error) {
-	fullURL := normalizeURL(apiCfg.BaseURL)
+// Generate performs a synchronous OpenAI-compatible HTTP call.
+func (p *OpenAIProvider) Generate(ctx context.Context, req LLMRequest) (*LLMResponse, error) {
+	fullURL := normalizeURL(p.cfg.BaseURL)
 	tracker := taskTokensFromContext(ctx)
-	tracker.beginCall(messages)
+	tracker.beginCall(req.Messages)
 
 	reqBody := ChatRequest{
-		Model:     apiCfg.Model,
-		Messages:  messages,
-		MaxTokens: apiCfg.MaxTokens,
+		Model:     p.cfg.Model,
+		Messages:  req.Messages,
+		MaxTokens: p.cfg.MaxTokens,
 	}
 
 	bts, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", fullURL, bytes.NewBuffer(bts))
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", fullURL, bytes.NewBuffer(bts))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-	if apiCfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+apiCfg.APIKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+	if p.cfg.APIKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+p.cfg.APIKey)
 	}
 
-	timeout := time.Duration(apiCfg.HTTPTimeoutSeconds) * time.Second
+	timeout := time.Duration(p.cfg.HTTPTimeoutSeconds) * time.Second
 	client := &http.Client{Timeout: timeout}
-	resp, err := client.Do(req)
+	resp, err := client.Do(httpReq)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API 响应错误，状态码: %d, 返回内容: %s", resp.StatusCode, string(bodyBytes))
+		return nil, fmt.Errorf("API 响应错误，状态码: %d, 返回内容: %s", resp.StatusCode, redactSensitiveText(string(bodyBytes)))
 	}
 
 	var chatResp ChatResponse
 	if err := json.Unmarshal(bodyBytes, &chatResp); err != nil {
-		return "", err
+		return nil, err
 	}
 
 	if len(chatResp.Choices) > 0 {
 		content := chatResp.Choices[0].Message.Content
 		if tracker != nil {
 			if chatResp.Usage != nil {
-				tracker.finishCall(chatResp.Usage.PromptTokens, chatResp.Usage.CompletionTokens, true, messages, content)
+				tracker.finishCall(chatResp.Usage.PromptTokens, chatResp.Usage.CompletionTokens, true, req.Messages, content)
 			} else {
-				tracker.finishCall(0, 0, false, messages, content)
+				tracker.finishCall(0, 0, false, req.Messages, content)
 			}
 		}
-		return content, nil
+		return &LLMResponse{Content: content}, nil
 	}
-	return "", fmt.Errorf("接口未响应有效 Choices 文本")
+	return nil, fmt.Errorf("接口未响应有效 Choices 文本")
 }
 
 func CallAPIWithRetry(ctx context.Context, apiCfg *APIConfig, system, user string) string {
@@ -303,44 +393,63 @@ func CallAPIStream(ctx context.Context, apiCfg *APIConfig, system, user string, 
 
 // CallAPIStreamMessages 以完整的多轮消息数组调用 API（流式）。
 func CallAPIStreamMessages(ctx context.Context, apiCfg *APIConfig, messages []Message, onChunk func(string)) (string, error) {
-	fullURL := normalizeURL(apiCfg.BaseURL)
+	provider, err := providerFromConfig(apiCfg)
+	if err != nil {
+		return "", err
+	}
+	resp, err := provider.Stream(ctx, LLMRequest{Messages: messages}, onChunk)
+	if err != nil {
+		if resp != nil {
+			return resp.Content, err
+		}
+		return "", err
+	}
+	if resp == nil {
+		return "", fmt.Errorf("流式响应为空")
+	}
+	return resp.Content, nil
+}
+
+// Stream performs an OpenAI-compatible streaming HTTP call.
+func (p *OpenAIProvider) Stream(ctx context.Context, req LLMRequest, onChunk func(string)) (*LLMResponse, error) {
+	fullURL := normalizeURL(p.cfg.BaseURL)
 	tracker := taskTokensFromContext(ctx)
-	tracker.beginCall(messages)
+	tracker.beginCall(req.Messages)
 
 	reqBody := ChatRequest{
-		Model:    apiCfg.Model,
-		Messages: messages,
-		Stream:   true,
+		Model:         p.cfg.Model,
+		Messages:      req.Messages,
+		Stream:        true,
 		StreamOptions: &streamOptions{IncludeUsage: true},
-		MaxTokens: apiCfg.MaxTokens,
+		MaxTokens:     p.cfg.MaxTokens,
 	}
 
 	bts, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", fullURL, bytes.NewBuffer(bts))
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", fullURL, bytes.NewBuffer(bts))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-	if apiCfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+apiCfg.APIKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+	if p.cfg.APIKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+p.cfg.APIKey)
 	}
 
-	timeout := time.Duration(apiCfg.HTTPTimeoutSeconds) * time.Second
+	timeout := time.Duration(p.cfg.HTTPTimeoutSeconds) * time.Second
 	client := &http.Client{Timeout: timeout}
-	resp, err := client.Do(req)
+	resp, err := client.Do(httpReq)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("API 响应错误，状态码: %d, 返回内容: %s", resp.StatusCode, string(bodyBytes))
+		return nil, fmt.Errorf("API 响应错误，状态码: %d, 返回内容: %s", resp.StatusCode, redactSensitiveText(string(bodyBytes)))
 	}
 
 	var fullContent strings.Builder
@@ -349,7 +458,7 @@ func CallAPIStreamMessages(ctx context.Context, apiCfg *APIConfig, messages []Me
 
 	for scanner.Scan() {
 		if ctx.Err() != nil {
-			return fullContent.String(), ctx.Err()
+			return &LLMResponse{Content: fullContent.String()}, ctx.Err()
 		}
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data: ") {
@@ -381,16 +490,16 @@ func CallAPIStreamMessages(ctx context.Context, apiCfg *APIConfig, messages []Me
 
 	result := fullContent.String()
 	if result == "" {
-		return "", fmt.Errorf("流式响应为空")
+		return nil, fmt.Errorf("流式响应为空")
 	}
 	if tracker != nil {
 		if streamUsage != nil {
-			tracker.finishCall(streamUsage.PromptTokens, streamUsage.CompletionTokens, true, messages, result)
+			tracker.finishCall(streamUsage.PromptTokens, streamUsage.CompletionTokens, true, req.Messages, result)
 		} else {
-			tracker.finishCall(0, 0, false, messages, result)
+			tracker.finishCall(0, 0, false, req.Messages, result)
 		}
 	}
-	return result, nil
+	return &LLMResponse{Content: result}, nil
 }
 
 func CallAPIStreamWithRetry(ctx context.Context, apiCfg *APIConfig, system, user string, onChunk func(string)) string {

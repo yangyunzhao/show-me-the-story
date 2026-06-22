@@ -4,7 +4,7 @@
 
 ## 项目概述
 
-单二进制 Go Web 应用，Go 后端零外部依赖（仅标准库），通过 OpenAI 兼容 API 自动生成长篇小说。前端使用 Vite + Svelte 4 + DaisyUI 4 构建，产物通过 `embed.FS` 内嵌到二进制中。
+单二进制 Go Web 应用，Go 后端零外部依赖（仅标准库），通过内部 LLM Provider 调用模型自动生成长篇小说；当前默认使用 OpenAI-compatible Provider，并已有 Codex Provider 后端原型（非流式 + 可选流式）。前端使用 Vite + Svelte 4 + DaisyUI 4 构建，产物通过 `embed.FS` 内嵌到二进制中。
 
 - **Go 版本**：1.25.1
 - **模块名**：`showmethestory`
@@ -57,8 +57,9 @@ task dev                              # 编译并启动 Go 后端
                   ├─ agent.go       ← Agent Loop 引擎 + 内置工具集（全局助理用）
                   ├─ editing.go     ← 章节正文局部编辑（替换行/替换文本/插入/追加）
                   ├─ chat.go        ← 会话管理（JSON 文件存储）
-                  ├─ api.go         ← OpenAI API 调用 + 重试 + 致命错误检测 + context 支持
-                  ├─ config.go      ← 配置结构体 + 加载/保存（含 SkillConfig）
+                  ├─ api.go         ← LLMProvider 抽象 + OpenAI-compatible/Codex Provider 选择 + 重试 + 致命错误检测 + context 支持
+                  ├─ codex_provider.go ← Codex app-server stdio Provider 原型（Generate + Stream，流式由 codex_use_streaming 控制）
+                  ├─ config.go      ← 配置结构体 + API provider 默认化 + Codex 字段 + 加载/保存（含 SkillConfig）
                   ├─ state.go       ← 进度/章节/伏笔结构体 + 持久化
                   ├─ prompts.go     ← 提示词模板渲染 + 内置默认模板
                   ├─ postprocess.go ← 全书优化（诊断/核查/路线图/按章执行）+ postprocess.json 持久化
@@ -70,9 +71,12 @@ task dev                              # 编译并启动 Go 后端
 | 文件 | 职责 |
 |------|------|
 | `main.go` | 入口，确定程序目录（`progDir`），创建 `storys/` 目录，加载 API 配置，启动 Web 服务器（无项目选择状态）；`var version = "dev"` 通过 CI `-ldflags` 注入实际版本号 |
-| `config.go` | `APIConfig`（含 `ContextBudgetTokens` 全书优化上下文预算）、`Config`（含 `SkillConfig` + `Language`）、`StoryConfig`、`PromptsConfig` 结构体，Load/Save 函数，`DefaultConfigForLang(lang)`、`NormalizeLanguage`、`applyDefaults(lang)` 按语言选择默认 prompts |
+| `config.go` | `APIProviderType`（`openai_compatible` / `codex`）、`APIConfig`（含 `Provider`、`ContextBudgetTokens` 全书优化上下文预算、`CodexModel`、`CodexWorkingDir`、`CodexUseStreaming`）、`normalizeAPIConfig`（旧 `api.json` 缺 provider 时默认 OpenAI-compatible；Codex 工作目录缺省为系统临时目录下 `show-me-the-story-codex`）、`Config`（含 `SkillConfig` + `Language`）、`StoryConfig`、`PromptsConfig` 结构体，Load/Save 函数，`DefaultConfigForLang(lang)`、`NormalizeLanguage`、`applyDefaults(lang)` 按语言选择默认 prompts |
 | `state.go` | `Progress`、`ChapterState`、`Foreshadow` 结构体，`LoadProgress`、`SaveProgress`（原子写入）、`ChapterMarkdownPath`、`SaveChapterMarkdown(projectDir, ...)`、`ForeshadowRoadmapPath`（项目目录 `Foreshadows.md`） |
-| `api.go` | `CallAPI`/`CallAPIMessages`（**内部优先流式缓冲**，失败时回退 `callAPIMessagesSync`）、`CallAPIStream`/`CallAPIStreamMessages`（流式，含 `stream_options.include_usage`）、`CallAPIWithRetry`/`CallAPIWithRetryLog`（无限重试）、`CallAPIStreamWithRetry`/`CallAPIStreamWithRetryLog`，`validateAPIConfig`、`isFatalAPIError`（401/403/404 致命，网络超时可重试）；所有调用经 `taskCtx` 时自动累计 token（优先 API `usage`，否则 rune 估算） |
+| `api.go` | `LLMProvider` / `LLMRequest` / `LLMResponse` 内部抽象、`OpenAIProvider`（OpenAI-compatible HTTP 同步/流式实现）、`providerFromConfig`（支持 `openai_compatible` 与 `codex`）、`CallAPI`/`CallAPIMessages`（**内部优先流式缓冲**，失败时回退 provider `Generate`；Codex 在 `codex_use_streaming=false` 时依赖该非流式回退）、`CallAPIStream`/`CallAPIStreamMessages`（流式，OpenAI-compatible 支持 `stream_options.include_usage`；Codex 在 `codex_use_streaming=true` 时消费 app-server delta 事件）、`CallAPIWithRetry`/`CallAPIWithRetryLog`（无限重试）、`CallAPIStreamWithRetry`/`CallAPIStreamWithRetryLog`，`validateAPIConfig`、`isFatalAPIError`（401/403/404/不支持的 provider/Codex 配置、app-server 启动类错误、Codex turn failed/interrupted 致命，网络超时可重试）；OpenAI-compatible HTTP 错误 body 会先脱敏再进入错误信息；所有调用经 `taskCtx` 时自动累计 token（优先 API `usage`，否则 rune 估算） |
+| `codex_provider.go` | `CodexProvider` 后端原型：每次 `Generate` / `Stream` 启动本机 `codex app-server --stdio` 子进程，使用 newline JSON-RPC 执行 `initialize` → `initialized` → `thread/start` → `turn/start`，设置 `approvalPolicy=never`、只读 sandbox、ephemeral thread、安全工作目录；将 `Message` 数组包装为单段文本 prompt，要求只输出最终文本/JSON；`Stream` 在 `codex_use_streaming=true` 时把 `item/agentMessage/delta` 转为现有 `onChunk` 回调并更新 token 估算，final-only 响应用一次性 chunk 兜底，避免 final 文本重复推送；app-server stderr 进入错误信息前会通过 `redactSensitiveText` 脱敏；不读取、不解析、不打印、不保存 Codex token；拒绝磁盘根、用户 home 根和当前源码根作为 Codex 工作目录 |
+| `api_provider_test.go` | Provider 配置与安全测试：覆盖默认/旧 `api.json` 兼容、provider 选择、OpenAI/Codex 校验规则、Codex 工作目录拒绝、fatal/retry 分类、错误详情脱敏、Codex thread 安全参数和 JSON-RPC 错误 |
+| `codex_provider_test.go` | CodexProvider 协议测试：覆盖 prompt 角色保留、中文/JSON 指令、delta 拼接、final-only 兜底、final 去重、未知事件忽略、失败 turn、非法 JSON 行和 context cancel |
 | `outline.go` | `generateOutline`、`reviseOutline`、`GenerateOutlineAction`（存在已确认章节时拒绝整体重新生成）、`ReviseOutlineAction`、`ConfirmOutlineAction`、`EditChapterOutline`、`cleanJSONResponse` |
 | `writing.go` | `GenerateChapterAction`（含写前大纲一致性检查，共 5 步；第 5 步更新伏笔并落盘 `Foreshadows.md`）、`ReviseChapterAction`/`ReviseSpecificChapterAction`（修订后同步更新伏笔）、`ConfirmChapterAction`、`PolishChapterAction`、`SmoothTransitionsAction`（批量优化已确认章节衔接，逐章最小化重写开头、逐章落盘）、`parseFactCheckResult`（JSON 优先 + 字符串 fallback）、`checkOutlineConsistency`（写前检查本章大纲与已写剧情冲突，冲突时最小化修订本章大纲）、章节内容生成/摘要/事实核查/流式输出、`stripChapterMetaProse`（生成/修订/润色后剔除首尾元信息行）、`buildHistorySummary`、`buildPreviousChapterTail`（上一章尾部约 800 字注入写作 prompt）、`buildOutlineConstraints`（全书章节脉络反向约束：后续 10 章大纲防提前出现 + 前文大纲防一次性事件重复，注入写作与事实核查 prompt）、`appendIfMissingPlaceholder`（老项目持久化旧模板缺新占位符时把上下文块追加到渲染结果末尾兜底）、`splitChapterOpening` |
 | `foreshadow.go` | `SuggestForeshadows`、`UpdateForeshadows`、伏笔格式化注入、伏笔告警、`BuildForeshadowRoadmapMarkdown`、`SaveForeshadowRoadmap`、`syncForeshadowsAfterChapter`、`NextForeshadowID` |
@@ -119,7 +123,7 @@ task dev                              # 编译并启动 Go 后端
 | `src/lib/i18n/index.js` | `uiLocale`、`t`/`translate`（`{name}`）、`formatKeyedMessage`/`formatLogEntry`/`formatToolResult`（服务端 key + `{0}`）、`translateServerMessage` legacy 兜底 |
 | `src/lib/i18n/zh.js`, `en.js` | 扁平 key 字典；新增可见文案必须同时在两个文件加 key |
 | `src/pages/Projects.svelte` | 项目选择页：新建项目（名称全宽 + 中文/EN 分段按钮选语言，POST 时携带 `language`）+ 项目列表（每项显示语言 badge，可选择/删除）；选中项目后 `setLocale(project.language)` |
-| `src/pages/Config.svelte` | 配置页：API 配置（含上下文预算 tokens）、故事配置（直接 PUT 保存 + 关键设定变更时提示协调）、写作风格与叙述视角、角色管理、世界观管理、组织管理（卡片 + 成员勾选）、关系管理（卡片 + 源/目标实体选择）；任务运行时所有输入控件禁用 |
+| `src/pages/Config.svelte` | 配置页：API 配置（provider 分段选择，`openai_compatible` 显示 Base URL / Model / API Key / timeout / max tokens，`codex` 显示 Codex model / 工作目录 / 流式 toggle，并保留隐藏 provider 字段；含上下文预算 tokens）、故事配置（直接 PUT 保存 + 关键设定变更时提示协调）、写作风格与叙述视角、角色管理、世界观管理、组织管理（卡片 + 成员勾选）、关系管理（卡片 + 源/目标实体选择）；任务运行时所有输入控件、provider 切换、保存和测试禁用 |
 | `src/pages/Outline.svelte` | 大纲页：直接操作按钮（生成/确认/修订意见/删除/生成后续大纲）+ 导入续写 + pending 章节内联编辑 + 流式预览 |
 | `src/pages/Writing.svelte` | 写作页：章节列表（状态点）+ 直接操作（生成/确认/修改意见/去AI味，自动区分当前章修订与定向修订）+ 事实核查冲突处理面板（`pending_writing_conflict`，可选修改大纲/伏笔/重试/保留稿进入审核）+ 自动确认模式开关（toggle，随时可开关）+ 伏笔追踪摘要卡片（活跃/超期/临近回收）+ 优化章节衔接（进度卡片工具栏小按钮，已确认 ≥ 2 章时显示）+ 导出 TXT + 复制 + 上下章导航 + 流式尾部窗口展示（含「仅显示最新内容」提示；任务进行中当前章显示 taskTokenUsage，空闲时显示正文字数）+ rAF 自动滚动（自动确认模式下自动跟随正在生成的章节）+ 全书完成后展示 `PostProcessPanel` |
 | `src/components/TaskTokenBadge.svelte` | 任务 token 展示组件（`↑ prompt ↓ completion tokens`），供 ChatPanel / App 顶栏 / Writing 页复用 |
@@ -216,7 +220,30 @@ userPrompt := RenderPrompt(cfg.Prompts.ChapterWriting, map[string]string{
 
 ### 双配置结构 + SkillConfig
 
-API 配置（`APIConfig`）与故事配置（`Config`）完全分离，分别保存为 `api.json` 和 `config.json`。`Config` 中包含 `SkillConfig` 字段，存储技能启用状态。所有 AI 调用函数接收 `*APIConfig`，故事相关函数同时接收 `*APIConfig` 和 `*Config`。
+API 配置（`APIConfig`）与故事配置（`Config`）完全分离，分别保存为 `api.json` 和 `config.json`。`APIConfig.Provider` 默认 `openai_compatible`；旧版 `api.json` 没有 `provider` 字段时，`normalizeAPIConfig` 会自动补为 OpenAI-compatible。`provider=codex` 时使用 `codex_model`、`codex_working_dir`、`codex_use_streaming` 字段，不要求 `base_url` / `api_key` / `model`；Codex 要求显式填写 `codex_model`，工作目录为空时默认系统临时目录下 `show-me-the-story-codex`，且拒绝磁盘根、用户 home 根和当前源码根。`codex_use_streaming` 默认为 `false`，手动设为 `true` 后 Codex 才接入章节流式路径。`Config` 中包含 `SkillConfig` 字段，存储技能启用状态。所有 AI 调用函数接收 `*APIConfig`，故事相关函数同时接收 `*APIConfig` 和 `*Config`。
+
+### LLM Provider 抽象
+
+`api.go` 保留原有 `CallAPI*` / `CallAPIStream*` 对外函数签名，业务层（大纲、写作、伏笔、全书优化、Agent）不直接感知 provider。内部通过 `providerFromConfig(apiCfg)` 选择 `LLMProvider`；`OpenAIProvider` 封装 OpenAI-compatible `/chat/completions` 同步与流式 HTTP 逻辑。`CodexProvider` 通过本机 `codex app-server --stdio` 使用已登录 Codex CLI；`Generate` 走非流式兼容路径，`Stream` 在 `codex_use_streaming=true` 时消费 app-server delta 事件并复用现有 `onChunk` / SSE 链路。`codex_use_streaming=false` 时 `CallAPIMessages` 仍可回退到 `Generate`，但直接调用 `CallAPIStream*` 的章节路径会得到流式未启用错误。
+
+### Codex Provider 限制
+
+- 后端已支持非流式 `Generate` 和可选流式 `Stream`；流式必须在配置页或 `api.json` 中设置 `codex_use_streaming=true`。
+- 前端配置页已支持 provider 选择和 Codex 字段；真实调用仍依赖本机已安装 `codex` 命令并完成 `codex login`。
+- 不开放 `/v1/chat/completions` 代理、本地 WebSocket 或任何新增监听端口。
+- 不读取 `~/.codex/auth.json`，不处理 Codex token，不把 OpenAI API Key 传给 app-server。
+- app-server 以只读 sandbox、`approvalPolicy=never`、ephemeral thread、安全工作目录运行；prompt 明确要求只生成文本，不调用工具或读写文件。
+- provider 错误详情中的 `Bearer ...`、`sk-...`、`api_key`、`access_token`、`refresh_token`、`id_token`、`secret`、`password` 等敏感字段会脱敏后再进入错误信息。
+- 当前停止任务策略依赖任务 context 取消并结束本次 app-server 子进程，未实现长期 app-server 复用或 `turn/interrupt` 优雅中断。
+
+`CallAPIMessages` 的行为必须保持：先走流式并缓冲全文，使 token 统计在等待期间更新；流式失败且非致命错误时再回退到 provider 的同步 `Generate`。`CallAPIStreamMessages` 必须继续支持 `stream_options.include_usage`、`onChunk` 和 `TaskTokenUsage.updateStreamContent`。
+
+### Phase 6 Codex Provider 验收补充
+
+- `PostAPITest` 成功响应只返回 `success`、`message`、`model` 和 `response_chars`，不返回模型输出 sample；Codex 模式下 `model` 使用 `codex_model`。OpenAI-compatible 连接测试超时为 15 秒，Codex 连接测试超时为 90 秒；测试开始、成功、失败、超时都会输出到命令行和右侧日志面板。
+- ChatGPT 账号登录 Codex CLI 时，`gpt-5-codex` 可能不可用；实测应先看 `codex doctor` 的 `Configuration.model`，当前环境显示为 `gpt-5.5`。
+- Codex app-server 可能在 websocket 抖动时发送 `Reconnecting... n/5` error notification；这是临时重连状态，`CodexProvider` 会继续等待最终 turn 完成、失败或超时。
+- `handlers_api_provider_test.go` 覆盖 `GET/PUT/POST /api/config/api*`、provider 字段保留、任务运行中 409、保存失败不替换内存配置、fake Codex app-server 非流式/流式/context cancel。
 
 ### Skill 可选性设计
 
@@ -247,7 +274,7 @@ API 配置（`APIConfig`）与故事配置（`Config`）完全分离，分别保
 
 所有 API 函数的第一个参数为 `context.Context`，支持任务取消。`CallAPIWithRetry` / `CallAPIStreamWithRetry` 为重试 + 指数退避（最大 30s），检查 `ctx.Err()` 实现取消，`time.Sleep` 替换为 `select { case <-time.After(d): case <-ctx.Done(): return }` 模式。带 `Log` 后缀的变体通过 SSE 推送重试信息。
 
-致命错误检测：`isFatalAPIError` 检测 HTTP 401/403/404 等不可恢复错误，立即停止重试；网络超时/连接重置等瞬时错误会继续重试。`validateAPIConfig` 在任务开始前检查 BaseURL 和 Model 是否为空。
+致命错误检测：`isFatalAPIError` 检测 HTTP 401/403/404 等不可恢复错误，立即停止重试；网络超时/连接重置等瞬时错误会继续重试。`validateAPIConfig` 在任务开始前按 provider 校验：OpenAI-compatible 检查 BaseURL 和 Model，Codex 检查 `codex_model` 和安全工作目录。
 
 ### 流式输出
 
