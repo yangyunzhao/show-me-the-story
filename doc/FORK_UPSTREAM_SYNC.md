@@ -67,7 +67,35 @@ codex
 
 只有当 `git status` 显示 `working tree clean` 时，再继续同步。
 
-### 2. 拉取两个远端的最新历史
+### 2. 先把本地提交推到自己的 fork
+
+如果你刚刚让 Codex CLI 把本地改动整理成 commit，这些 commit 仍然只在本机。同步官方仓库前，建议先推到自己的 fork，给当前功能留一个远端备份点：
+
+```powershell
+git push origin main
+```
+
+如果你不确定当前分支是不是 `main`，先执行：
+
+```powershell
+git branch --show-current
+```
+
+如果当前不在 `main`，不要随手强推。让 Codex CLI 检查分支关系：
+
+```powershell
+codex
+```
+
+提示词：
+
+```text
+我已经把本地功能提交成 commit，但还没有 push。
+请检查当前分支、origin/main 和本地提交关系，帮我把这些本地提交安全推到自己的 fork。
+不要强推，不要执行 git reset --hard。
+```
+
+### 3. 拉取两个远端的最新历史
 
 ```powershell
 git fetch origin
@@ -95,7 +123,7 @@ git pull --ff-only origin main 失败，说明本地 main 与 origin/main 分叉
 不要使用 git reset --hard，不要强推，完成后说明处理结果。
 ```
 
-### 3. 创建本次同步分支
+### 4. 创建本次同步分支
 
 分支名建议带日期和时间，方便回退和排查：
 
@@ -104,7 +132,7 @@ $d = Get-Date -Format "yyyyMMdd-HHmm"
 git switch -c "sync/upstream-$d"
 ```
 
-### 4. 合并官方最新代码
+### 5. 合并官方最新代码
 
 ```powershell
 git merge --no-ff upstream/main
@@ -295,6 +323,7 @@ git checkout -- .
 
 ```powershell
 git status
+git push origin main
 git fetch origin
 git fetch upstream
 git switch main
